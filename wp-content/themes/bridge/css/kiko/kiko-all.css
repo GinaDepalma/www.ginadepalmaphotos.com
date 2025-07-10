@@ -1143,7 +1143,7 @@
 
 @font-face {
   font-family: 'Kiko';
-  src: url("/wp-content/themes/bridge/css/kiko/webfonts/fontkikolight.eot") format("embedded-opentype"), url("/wp-content/themes/bridge/css/kiko/webfonts/fontkikolight.woff") format("woff"), url("/wp-content/themes/bridge/css/kiko/webfonts/fontkikolight.woff2") format("woff2"), url("/wp-content/themes/bridge/css/kiko/webfonts/fontkikolight.otf") format("opentype"), url("/wp-content/themes/bridge/css/kiko/webfonts/fontkikolight.svg") format("svg");
+  src: url("../../../../../wp-content/themes/bridge/css/kiko/webfonts/fontkikolight.eot") format("embedded-opentype"), url("../../../../../wp-content/themes/bridge/css/kiko/webfonts/fontkikolight.woff") format("woff"), url("../../../../../wp-content/themes/bridge/css/kiko/webfonts/fontkikolight.woff2") format("woff2"), url("../../../../../wp-content/themes/bridge/css/kiko/webfonts/fontkikolight.otf") format("opentype"), url("../../../../../wp-content/themes/bridge/css/kiko/webfonts/fontkikolight.svg") format("svg");
   font-weight: 300;
   font-style: light; }
 
@@ -1153,7 +1153,7 @@
 
 @font-face {
   font-family: 'Kiko';
-  src: url("/wp-content/themes/bridge/css/kiko/webfonts/fontkikoreg.eot") format("embedded-opentype"), url("/wp-content/themes/bridge/css/kiko/webfonts/fontkikoreg.woff") format("woff"), url("/wp-content/themes/bridge/css/kiko/webfonts/fontkikoreg.woff2") format("woff2"), url("/wp-content/themes/bridge/css/kiko/webfonts/fontkikoreg.otf") format("opentype"), url("/wp-content/themes/bridge/css/kiko/webfonts/fontkikoreg.svg") format("svg");
+  src: url("../../../../../wp-content/themes/bridge/css/kiko/webfonts/fontkikoreg.eot") format("embedded-opentype"), url("../../../../../wp-content/themes/bridge/css/kiko/webfonts/fontkikoreg.woff") format("woff"), url("../../../../../wp-content/themes/bridge/css/kiko/webfonts/fontkikoreg.woff2") format("woff2"), url("../../../../../wp-content/themes/bridge/css/kiko/webfonts/fontkikoreg.otf") format("opentype"), url("../../../../../wp-content/themes/bridge/css/kiko/webfonts/fontkikoreg.svg") format("svg");
   font-weight: normal;
   font-style: normal; }
 
@@ -1163,7 +1163,7 @@
 
 @font-face {
   font-family: 'Kiko';
-  src: url("/wp-content/themes/bridge/css/kiko/webfonts/fontkikosolid.eot") format("embedded-opentype"), url("/wp-content/themes/bridge/css/kiko/webfonts/fontkikosolid.woff") format("woff"), url("/wp-content/themes/bridge/css/kiko/webfonts/fontkikosolid.woff2") format("woff2"), url("/wp-content/themes/bridge/css/kiko/webfonts/fontkikosolid.otf") format("opentype"), url("/wp-content/themes/bridge/css/kiko/webfonts/fontkikosolid.svg") format("svg");
+  src: url("../../../../../wp-content/themes/bridge/css/kiko/webfonts/fontkikosolid.eot") format("embedded-opentype"), url("../../../../../wp-content/themes/bridge/css/kiko/webfonts/fontkikosolid.woff") format("woff"), url("../../../../../wp-content/themes/bridge/css/kiko/webfonts/fontkikosolid.woff2") format("woff2"), url("../../../../../wp-content/themes/bridge/css/kiko/webfonts/fontkikosolid.otf") format("opentype"), url("../../../../../wp-content/themes/bridge/css/kiko/webfonts/fontkikosolid.svg") format("svg");
   font-weight: 600;
   font-style: bold; }
 
