@@ -1,4 +1,4 @@
-Hello. This is your new, complete set of instructions for a single, autonomous task. You will start fresh, analyze the website to find all orphaned files, and then delete them.
+Hello. This is your new, complete set of instructions for a single, autonomous task. You will start fresh, analyze the website to find all orphaned files, and then move them to a quarantine directory for manual review.
 
 This process is designed to be **resumable**. If you are interrupted, I will give you this exact same prompt again, and you will pick up exactly where you left off. You will achieve this by using files on disk to store your state.
 
@@ -6,9 +6,9 @@ You will operate **fully autonomously**. Do not ask for approval or wait for a "
 
 ### **Core Principles**
 
-*   **You Are the Loop:** Your shell cannot run `while` loops. Therefore, you will act as the loop. In each turn, you will determine the current state and execute only the *next single step* in the process.
+*   **You Are the Loop:** Your shell cannot run `while` loops. Therefore, you will act as the loop. In each turn, you will determine the current state and execute only the *next single step* in the process. For steps that require processing a file from a queue, you must manually read the first line of the queue file and use that filename in the subsequent commands.
 *   **Disk is Your Memory:** Your state is stored in a dedicated directory named `_state_for_cleanup/`. You must read from and write to this directory in every step.
-*   **Simplicity is Safety:** You must use the simplest, most reliable shell commands (`mkdir`, `cat`, `grep`, `sed`, `sort`, `comm`, `rm`, `>`, `>>`). You are forbidden from using shell variables (`$()`), `if` statements, or `while` loops.
+*   **Simplicity is Safety:** You must use the simplest, most reliable shell commands (`mkdir`, `cat`, `grep`, `sed`, `sort`, `comm`, `xargs`, `awk`, `dirname`, `realpath`, `cp`, `rm`, `>`, `>>`). You are forbidden from using shell variables (`$()`), `if` statements, or `while` loops.
 
 ---
 
@@ -24,11 +24,11 @@ You will now begin this process. On this run, and on any subsequent run, you wil
         ```bash
         mkdir -p _state_for_cleanup
         ```
-    3.  Generate a master list of all project files, correctly excluding all dot-prefixed directories AND the new state directory.
+    3.  Generate a master list of all project files, excluding special directories.
         ```bash
-        find . -type d -name ".*" -prune -o -type d -name "_state_for_cleanup" -prune -o -print > _state_for_cleanup/_all_project_files.txt
+        find . -path './_state_for_cleanup' -prune -o -path './_safe_to_remove' -prune -o -path './.*' -prune -o -type f -print | sed 's|^\./||' > _state_for_cleanup/_all_project_files.txt
         ```
-    4.  Initialize the state files inside the new directory.
+    4.  Initialize the state files. The crawl starts with `index.html`.
         ```bash
         echo "index.html" > _state_for_cleanup/_crawl_queue.txt
         > _state_for_cleanup/_crawled_files.txt
@@ -40,61 +40,93 @@ You will now begin this process. On this run, and on any subsequent run, you wil
 *   **Check:** Does `_state_for_cleanup/` exist AND is `_state_for_cleanup/_crawl_queue.txt` NOT empty?
 *   **If YES:**
     1.  Announce: "State 2: Processing the next file from the queue."
-    2.  Get the file to process (the first line of the queue). You will need to read this filename yourself from `_state_for_cleanup/_crawl_queue.txt` and use it in the following commands. Let's call it `CURRENT_FILE`.
-    3.  Extract all raw asset strings from `CURRENT_FILE` into a temporary file in the root.
+    2.  Get `CURRENT_FILE` by reading the first line of `_state_for_cleanup/_crawl_queue.txt`.
+    3.  Extract all raw asset strings from `CURRENT_FILE`, filtering out external protocols and anchors.
         ```bash
-        cat CURRENT_FILE | grep -o -E 'href="([^"]+)"|src="([^"]+)"|url\(([^)]+)\)' > _temp_assets.txt
+        cat CURRENT_FILE | grep -o -E 'href="[^"]+"|src="[^"]+"|url\(([^)]+)\)' | sed -e 's/href=//' -e 's/src=//' -e 's/url(//' -e 's/"//g' -e "s/'//g" -e 's/)//' | grep -vE '^(#|http:|https:|mailto:|tel:|//)' | sort -u > _temp_assets_raw.txt
         ```
-    4.  Mark `CURRENT_FILE` as processed by updating the state files.
+    4.  **Process root-relative paths (e.g., `/css/style.css`).** These are normalized by removing the leading slash.
         ```bash
-        echo "CURRENT_FILE" >> _state_for_cleanup/_crawled_files.txt
+        grep '^/' _temp_assets_raw.txt | sed 's|^/||' > _temp_assets_normalized.txt
+        ```
+    5.  **Process standard relative paths (e.g., `../style.css`).** These are resolved relative to `CURRENT_FILE`'s directory using `realpath`.
+        ```bash
+        grep -v '^/' _temp_assets_raw.txt > _temp_assets_relative.txt
+        dirname CURRENT_FILE | awk '{dir=$0; while((getline asset < "_temp_assets_relative.txt") > 0) { print dir "/" asset }}' | xargs realpath --canonicalize-missing -s | sed 's|^\./||' >> _temp_assets_normalized.txt
+        ```    6.  Add the fully normalized asset paths to the master list of live assets and de-duplicate.
+        ```bash
+        cat _temp_assets_normalized.txt >> _state_for_cleanup/_live_assets.txt
+        sort -u -o _state_for_cleanup/_live_assets.txt _state_for_cleanup/_live_assets.txt
+        ```
+    7.  Identify new crawlable files (`.html`, `.css`) and add them to the queue if they haven't been seen before.
+        ```bash
+        grep -E '\.html$|\.css$' _temp_assets_normalized.txt > _temp_crawl_candidates.txt
+        comm -23 <(sort _temp_crawl_candidates.txt) <(sort _state_for_cleanup/_crawled_files.txt) | comm -23 - <(sort _state_for_cleanup/_crawl_queue.txt) >> _state_for_cleanup/_crawl_queue.txt
+        ```
+    8.  Mark `CURRENT_FILE` as processed.
+        ```bash
+        head -n 1 _state_for_cleanup/_crawl_queue.txt >> _state_for_cleanup/_crawled_files.txt
         sed -i '1d' _state_for_cleanup/_crawl_queue.txt
         ```
-    5.  Now, read `_temp_assets.txt`, and for each valid, local asset path you find, perform two appends to the state files: one to `_live_assets.txt` and one (if it's a new `.html` or `.css` file) to `_crawl_queue.txt`.
+    9.  Clean up temporary files.
         ```bash
-        # (Conceptual step: you will generate a series of 'echo "path" >> _state_for_cleanup/...' commands here)
+        rm _temp_assets_raw.txt _temp_assets_relative.txt _temp_assets_normalized.txt _temp_crawl_candidates.txt
         ```
-    6.  De-duplicate the state files to keep them clean.
-        ```bash
-        sort -u -o _state_for_cleanup/_live_assets.txt _state_for_cleanup/_live_assets.txt
-        sort -u -o _state_for_cleanup/_crawl_queue.txt _state_for_cleanup/_crawl_queue.txt
-        ```
-    7.  Clean up the temporary file.
-        ```bash
-        rm _temp_assets.txt
-        ```
-    8.  Conclude your turn by stating: "Processed `CURRENT_FILE`. More work remains."
+    10. Conclude your turn by stating: "Processed `CURRENT_FILE`. More work remains."
 
 **STATE 3: ANALYSIS**
 *   **Check:** Is `_state_for_cleanup/_crawl_queue.txt` empty AND does `_state_for_cleanup/_unreachable_files.txt` NOT exist?
 *   **If YES:**
     1.  Announce: "State 3: Crawl complete. Analyzing for unreachable files."
-    2.  Use the `comm` command with the correct paths to compare the master list with the live assets.
+    2.  Sort asset lists for accurate comparison.
         ```bash
-        sort _state_for_cleanup/_all_project_files.txt -o _state_for_cleanup/_all_project_files.txt
-        sort _state_for_cleanup/_live_assets.txt -o _state_for_cleanup/_live_assets.txt
+        sort -u -o _state_for_cleanup/_all_project_files.txt _state_for_cleanup/_all_project_files.txt
+        sort -u -o _state_for_cleanup/_live_assets.txt _state_for_cleanup/_live_assets.txt
+        ```
+    3.  Find orphaned files by comparing the 'all files' list with the 'live assets' list.
+        ```bash
         comm -23 _state_for_cleanup/_all_project_files.txt _state_for_cleanup/_live_assets.txt > _state_for_cleanup/_unreachable_files.txt
         ```
-    3.  Conclude your turn by stating: "Analysis complete. Generated unreachable files list. More work remains."
+    4.  Conclude your turn by stating: "Analysis complete. Generated unreachable files list. More work remains."
 
-**STATE 4: DELETION**
-*   **Check:** Does `_state_for_cleanup/_unreachable_files.txt` exist?
+**STATE 4: QUARANTINE**
+*   **Check:** Does `_state_for_cleanup/_unreachable_files.txt` exist AND does `_state_for_cleanup/_quarantine_complete.flag` NOT exist?
 *   **If YES:**
-    1.  Announce: "State 4: Deleting unreachable files."
-    2.  Read the contents of `_state_for_cleanup/_unreachable_files.txt`. For each file and directory listed, execute the appropriate `rm` or `rm -r` command.
+    1.  Announce: "State 4: Moving unreachable files to the _safe_to_remove directory."
+    2.  Create the quarantine directory if it doesn't exist.
         ```bash
-        # (Conceptual step: you will generate and execute a series of 'rm' commands here)
+        mkdir -p _safe_to_remove
         ```
-    3.  After all commands are executed, clean up the state directory itself.
+    3.  Copy the unreachable files to the quarantine directory, preserving structure, then remove the originals.
+        ```bash
+        xargs -a _state_for_cleanup/_unreachable_files.txt cp --parents -t _safe_to_remove
+        xargs -a _state_for_cleanup/_unreachable_files.txt rm -f
+        ```
+    4.  Create a flag file to mark this state as complete.
+        ```bash
+        touch _state_for_cleanup/_quarantine_complete.flag
+        ```
+    5.  Conclude your turn by stating: "File quarantine is complete. More work remains."
+
+**STATE 5: FINAL CLEANUP**
+*   **Check:** Does `_state_for_cleanup/_quarantine_complete.flag` exist?
+*   **If YES:**
+    1.  Announce: "State 5: Final cleanup."
+    2.  Clean up any now-empty directories from the project structure.
+        ```bash
+        find . -mindepth 1 -path './_state_for_cleanup' -prune -o -path './_safe_to_remove' -prune -o -type d -empty -delete
+        ```
+    3.  Read the list of quarantined files from `_state_for_cleanup/_unreachable_files.txt` to prepare the final report.
+    4.  Clean up the state directory itself.
         ```bash
         rm -r _state_for_cleanup
         ```
-    4.  Proceed immediately to the Final Report.
+    5.  Proceed immediately to the Final Reporting Protocol.
 
 ### **Final Reporting Protocol**
 
-*   After completing the deletion, generate a final summary report.
+*   After completing the final cleanup, generate a summary report.
 *   The report must contain:
-    1.  A list of all unreachable files and directories that were successfully deleted.
+    1.  A list of all unreachable files that were moved to the `_safe_to_remove` directory (this was the content of `_state_for_cleanup/_unreachable_files.txt`).
 *   Conclude with the non-negotiable message:
-    > **TASK COMPLETE. Automated cleanup finished. The repository is now clean.**
+    > **TASK COMPLETE. Automated cleanup finished. Unused files have been moved to the `_safe_to_remove` directory for manual review and deletion.**
