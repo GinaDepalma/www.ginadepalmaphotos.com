@@ -41,44 +41,49 @@ You will now begin this process. On this run, and on any subsequent run, you wil
 *   **If YES:**
     1.  Announce: "State 2: Processing the next file from the queue."
     2.  Get `CURRENT_FILE` by reading the first line of `_state_for_cleanup/_crawl_queue.txt`.
-    3.  Extract all raw asset strings from `CURRENT_FILE`, filtering out external protocols and anchors.
+    3.  **Extract and Sanitize Paths.** This crucial pipeline extracts all linked assets, then cleans them by removing query strings (`?ver=...`), anchors (`#...`), and any resulting blank lines. This ensures we are working with clean file paths.
         ```bash
-        cat CURRENT_FILE | grep -o -E 'href="[^"]+"|src="[^"]+"|url\(([^)]+)\)' | sed -e 's/href=//' -e 's/src=//' -e 's/url(//' -e 's/"//g' -e "s/'//g" -e 's/)//' | grep -vE '^(#|http:|https:|mailto:|tel:|//)' | sort -u > _temp_assets_raw.txt
+        cat CURRENT_FILE | grep -o -E 'href="[^"]+"|src="[^"]+"' | sed -e 's/href=//' -e 's/src=//' -e 's/"//g' | sed 's/?.*//' | sed 's/#.*//' | grep -v -E '^(#|http:|https:|mailto:|tel:|//|javascript:;)$' | grep -v '^$' > _temp_assets_raw.txt
         ```
-    4.  **Process root-relative paths (e.g., `/css/style.css`).** These are normalized by removing the leading slash.
+    4.  **Resolve "Pretty Links".** This step handles directory links (e.g., `about-us-6/`) by appending `index.html` to them, so the crawler knows which file to check.
         ```bash
-        grep '^/' _temp_assets_raw.txt | sed 's|^/||' > _temp_assets_normalized.txt
+        sed 's|/$|/index.html|' _temp_assets_raw.txt > _temp_assets_processed.txt
         ```
-    5.  **Process standard relative paths (e.g., `../style.css`).** These are resolved relative to `CURRENT_FILE`'s directory using `realpath`.
+    5.  **Normalize Root-Relative Paths.** Isolate paths starting with `/` and prepare them for the live asset list by removing the leading slash.
         ```bash
-        grep -v '^/' _temp_assets_raw.txt > _temp_assets_relative.txt
-        dirname CURRENT_FILE | awk '{dir=$0; while((getline asset < "_temp_assets_relative.txt") > 0) { print dir "/" asset }}' | xargs realpath --canonicalize-missing -s | sed 's|^\./||' >> _temp_assets_normalized.txt
-        ```    6.  Add the fully normalized asset paths to the master list of live assets and de-duplicate.
+        grep '^/' _temp_assets_processed.txt | sed 's|^/||' > _temp_assets_normalized.txt
+        ```
+    6.  **Normalize Standard Relative Paths.** Isolate other paths (like `../images/pic.jpg`), resolve them relative to `CURRENT_FILE`'s location, and add them to the normalized list.
+        ```bash
+        grep -v '^/' _temp_assets_processed.txt > _temp_assets_relative.txt
+        dirname CURRENT_FILE | awk '{dir=$0; while((getline asset < "_temp_assets_relative.txt") > 0) { if (asset) print dir "/" asset }}' | xargs realpath --canonicalize-missing -s | sed 's|^\./||' >> _temp_assets_normalized.txt
+        ```
+    7.  Add the fully resolved asset paths to the master list of live assets and de-duplicate.
         ```bash
         cat _temp_assets_normalized.txt >> _state_for_cleanup/_live_assets.txt
         sort -u -o _state_for_cleanup/_live_assets.txt _state_for_cleanup/_live_assets.txt
         ```
-    7.  Identify new crawlable files (`.html`, `.css`) and add them to the queue if they haven't been seen before.
+    8.  Identify new crawlable files (`.html`, `.css`) and add them to the queue if they haven't been seen before.
         ```bash
         grep -E '\.html$|\.css$' _temp_assets_normalized.txt > _temp_crawl_candidates.txt
         comm -23 <(sort _temp_crawl_candidates.txt) <(sort _state_for_cleanup/_crawled_files.txt) | comm -23 - <(sort _state_for_cleanup/_crawl_queue.txt) >> _state_for_cleanup/_crawl_queue.txt
         ```
-    8.  Mark `CURRENT_FILE` as processed.
+    9.  Mark `CURRENT_FILE` as processed.
         ```bash
         head -n 1 _state_for_cleanup/_crawl_queue.txt >> _state_for_cleanup/_crawled_files.txt
         sed -i '1d' _state_for_cleanup/_crawl_queue.txt
         ```
-    9.  Clean up temporary files.
+    10. Clean up temporary files.
         ```bash
-        rm _temp_assets_raw.txt _temp_assets_relative.txt _temp_assets_normalized.txt _temp_crawl_candidates.txt
+        rm _temp_assets_raw.txt _temp_assets_processed.txt _temp_assets_relative.txt _temp_assets_normalized.txt _temp_crawl_candidates.txt
         ```
-    10. Conclude your turn by stating: "Processed `CURRENT_FILE`. More work remains."
+    11. Conclude your turn by stating: "Processed `CURRENT_FILE`. More work remains."
 
 **STATE 3: ANALYSIS**
 *   **Check:** Is `_state_for_cleanup/_crawl_queue.txt` empty AND does `_state_for_cleanup/_unreachable_files.txt` NOT exist?
 *   **If YES:**
     1.  Announce: "State 3: Crawl complete. Analyzing for unreachable files."
-    2.  Sort asset lists for accurate comparison.
+    2.  Sort both lists for accurate comparison.
         ```bash
         sort -u -o _state_for_cleanup/_all_project_files.txt _state_for_cleanup/_all_project_files.txt
         sort -u -o _state_for_cleanup/_live_assets.txt _state_for_cleanup/_live_assets.txt
@@ -93,11 +98,11 @@ You will now begin this process. On this run, and on any subsequent run, you wil
 *   **Check:** Does `_state_for_cleanup/_unreachable_files.txt` exist AND does `_state_for_cleanup/_quarantine_complete.flag` NOT exist?
 *   **If YES:**
     1.  Announce: "State 4: Moving unreachable files to the _safe_to_remove directory."
-    2.  Create the quarantine directory if it doesn't exist.
+    2.  Create the quarantine directory.
         ```bash
         mkdir -p _safe_to_remove
         ```
-    3.  Copy the unreachable files to the quarantine directory, preserving structure, then remove the originals.
+    3.  Copy the unreachable files to the quarantine directory, preserving their directory structure. Then, remove the originals.
         ```bash
         xargs -a _state_for_cleanup/_unreachable_files.txt cp --parents -t _safe_to_remove
         xargs -a _state_for_cleanup/_unreachable_files.txt rm -f
@@ -112,7 +117,7 @@ You will now begin this process. On this run, and on any subsequent run, you wil
 *   **Check:** Does `_state_for_cleanup/_quarantine_complete.flag` exist?
 *   **If YES:**
     1.  Announce: "State 5: Final cleanup."
-    2.  Clean up any now-empty directories from the project structure.
+    2.  Clean up any now-empty directories from the main project structure.
         ```bash
         find . -mindepth 1 -path './_state_for_cleanup' -prune -o -path './_safe_to_remove' -prune -o -type d -empty -delete
         ```
