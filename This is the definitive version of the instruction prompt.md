@@ -1,3 +1,4 @@
+
 Hello. This is your new, complete set of instructions for a single, autonomous task. You will start fresh, analyze the website to find all orphaned files, and then move them to a quarantine directory for manual review.
 
 This process is designed to be **resumable**. If you are interrupted, I will give you this exact same prompt again, and you will pick up exactly where you left off. You will achieve this by using files on disk to store your state.
@@ -6,9 +7,9 @@ You will operate **fully autonomously**. Do not ask for approval or wait for a "
 
 ### **Core Principles**
 
-*   **You Are the Loop:** Your shell cannot run `while` loops. Therefore, you will act as the loop. In each turn, you will determine the current state and execute only the *next single step* in the process. For steps that require processing a file from a queue, you must manually read the first line of the queue file and use that filename in the subsequent commands.
+*   **You Are the Loop:** Your shell cannot run `while` loops. Therefore, you will act as the loop. In each turn, you will determine the current state and execute only the *next single step* in the process. You must operate on one file at a time where indicated.
 *   **Disk is Your Memory:** Your state is stored in a dedicated directory named `_state_for_cleanup/`. You must read from and write to this directory in every step.
-*   **Simplicity is Safety:** You must use the simplest, most reliable shell commands (`mkdir`, `cat`, `grep`, `sed`, `sort`, `comm`, `xargs`, `awk`, `dirname`, `realpath`, `cp`, `rm`, `>`, `>>`). You are forbidden from using shell variables (`$()`), `if` statements, `while` loops, or process substitution (`<()`).
+*   **Simplicity is Safety:** You must use the simplest, most reliable shell commands (`mkdir`, `cat`, `grep`, `sed`, `sort`, `xargs`, `awk`, `dirname`, `realpath`, `cp`, `rm`, `>`, `>>`). You are forbidden from using `comm`, shell variables (`$()`), `if` statements, `while` loops, or process substitution (`<()`).
 
 ---
 
@@ -39,48 +40,45 @@ You will operate **fully autonomously**. Do not ask for approval or wait for a "
 *   **If YES:**
     1.  Announce: "State 2: Processing the next file from the queue."
     2.  Get `CURRENT_FILE` by manually reading the first line of `_state_for_cleanup/_crawl_queue.txt`.
-    3.  **Extract, Sanitize, and Filter Paths.** This single pipeline extracts links, cleans them of query strings and anchors, and filters out all external/protocol links, leaving only local paths.
+    3.  **Extract, Sanitize, and Filter Paths.** This pipeline extracts links, cleans them of query strings/anchors, and filters out all non-local paths.
         ```bash
         cat CURRENT_FILE | grep -o -E 'href="[^"]+"|src="[^"]+"' | sed -e 's/href=//' -e 's/src=//' -e 's/"//g' | sed 's/?.*//' | sed 's/#.*//' | grep -v '://' | grep -v -E '^(//|mailto:|tel:|javascript:;)' | grep -v '^$' > _temp_assets_local.txt
         ```
-    4.  **Resolve "Pretty Links"** by appending `index.html` to any path ending in `/`.
+    4.  **Resolve "Pretty Links" and Normalize Paths.** This series of commands resolves all found paths to their full, root-relative form.
         ```bash
         sed 's|/$|/index.html|' _temp_assets_local.txt > _temp_assets_processed.txt
-        ```
-    5.  **Normalize Paths.** Resolve all paths to be relative to the project root and save them to a single temporary file.
-        ```bash
         grep '^/' _temp_assets_processed.txt | sed 's|^/||' > _temp_assets_normalized.txt
         dirname CURRENT_FILE > _temp_dir.txt
         grep -v '^/' _temp_assets_processed.txt | awk 'BEGIN { getline dir < "_temp_dir.txt" } { if ($0) print dir "/" $0 }' | xargs realpath --canonicalize-missing -s | sed 's|^\./||' >> _temp_assets_normalized.txt
         ```
-    6.  Add the fully resolved paths to the `_live_assets.txt` list and de-duplicate it.
+    5.  Add the fully resolved paths to the `_live_assets.txt` list and de-duplicate it.
         ```bash
         cat _temp_assets_normalized.txt >> _state_for_cleanup/_live_assets.txt
         sort -u -o _state_for_cleanup/_live_assets.txt _state_for_cleanup/_live_assets.txt
         ```
-    7.  **Identify New Crawlable Files.** First, get a list of potential candidates (`.html`/`.css`) from the normalized assets.
+    6.  **Identify and Add New Crawlable Files (Robust Method).** First, get a list of potential candidates.
         ```bash
         grep -E '\.html$|\.css$' _temp_assets_normalized.txt | sort -u > _temp_crawl_candidates.txt
-        ```    8.  **Filter Out Already Crawled Files.** Use `comm` to find candidates that are NOT in `_crawled_files.txt`.
-        ```bash
-        sort -u _state_for_cleanup/_crawled_files.txt > _temp_crawled_files.sorted
-        comm -23 _temp_crawl_candidates.txt _temp_crawled_files.sorted > _temp_truly_new.txt
         ```
-    9.  **Filter Out Files Already in Queue.** Use `comm` again to find which of the remaining candidates are NOT already in `_crawl_queue.txt`, and append them.
+    7.  **Process one candidate at a time.** Manually read the first line of `_temp_crawl_candidates.txt`. For that single filename, check if it already exists in `_crawled_files.txt` or `_crawl_queue.txt`.
         ```bash
-        sort -u _state_for_cleanup/_crawl_queue.txt > _temp_crawl_queue.sorted
-        comm -23 _temp_truly_new.txt _temp_crawl_queue.sorted >> _state_for_cleanup/_crawl_queue.txt
-        ```
-    10. Mark `CURRENT_FILE` as processed by moving it from the queue to the crawled list.
+        # Conceptual: You will perform this logic for the first file in _temp_crawl_candidates.txt
+        # Example for a candidate file named "new_page.html":
+        # grep -q -x "new_page.html" _state_for_cleanup/_crawled_files.txt
+        # grep -q -x "new_page.html" _state_for_cleanup/_crawl_queue.txt
+        # If both checks fail (return non-zero), then append it:
+        # echo "new_page.html" >> _state_for_cleanup/_crawl_queue.txt
+        ```    8.  After processing the single candidate, remove it from the candidate list and repeat the process if more candidates remain. If no candidates remain, proceed to the next step.
+    9.  Mark `CURRENT_FILE` as processed.
         ```bash
         head -n 1 _state_for_cleanup/_crawl_queue.txt >> _state_for_cleanup/_crawled_files.txt
         sed -i '1d' _state_for_cleanup/_crawl_queue.txt
         ```
-    11. Clean up all temporary files.
+    10. Clean up all temporary files.
         ```bash
-        rm _temp_assets_local.txt _temp_assets_processed.txt _temp_assets_normalized.txt _temp_dir.txt _temp_crawl_candidates.txt _temp_crawled_files.sorted _temp_truly_new.txt _temp_crawl_queue.sorted
+        rm _temp_assets_local.txt _temp_assets_processed.txt _temp_assets_normalized.txt _temp_dir.txt _temp_crawl_candidates.txt
         ```
-    12. Conclude your turn by stating: "Processed `CURRENT_FILE`. More work remains."
+    11. Conclude your turn by stating: "Processed `CURRENT_FILE`. More work remains."
 
 **STATE 3: ANALYSIS**
 *   **Check:** Is `_state_for_cleanup/_crawl_queue.txt` empty AND does `_state_for_cleanup/_unreachable_files.txt` NOT exist?
