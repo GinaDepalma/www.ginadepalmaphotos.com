@@ -40,44 +40,47 @@ You will now begin this process. On this run, and on any subsequent run, you wil
 *   **Check:** Does `_state_for_cleanup/` exist AND is `_state_for_cleanup/_crawl_queue.txt` NOT empty?
 *   **If YES:**
     1.  Announce: "State 2: Processing the next file from the queue."
-    2.  Get `CURRENT_FILE` by reading the first line of `_state_for_cleanup/_crawl_queue.txt`.
-    3.  **Extract and Sanitize Paths.** This crucial pipeline extracts all linked assets, then cleans them by removing query strings (`?ver=...`), anchors (`#...`), and any resulting blank lines. This ensures we are working with clean file paths.
+    2.  Get the file to process. **You will need to manually read the first line** of `_state_for_cleanup/_crawl_queue.txt` and use that filename in the commands below. Let's call it `CURRENT_FILE`.
+    3.  **Extract and Sanitize Paths.** This pipeline extracts all linked assets, removes query strings and anchors, and filters out all external/protocol links.
         ```bash
-        cat CURRENT_FILE | grep -o -E 'href="[^"]+"|src="[^"]+"' | sed -e 's/href=//' -e 's/src=//' -e 's/"//g' | sed 's/?.*//' | sed 's/#.*//' | grep -v -E '^(#|http:|https:|mailto:|tel:|//|javascript:;)$' | grep -v '^$' > _temp_assets_raw.txt
+        cat CURRENT_FILE | grep -o -E 'href="[^"]+"|src="[^"]+"' | sed -e 's/href=//' -e 's/src=//' -e 's/"//g' | sed 's/?.*//' | sed 's/#.*//' | grep -v '://' | grep -v -E '^(//|mailto:|tel:|javascript:;)' | grep -v '^$' > _temp_assets_local.txt
         ```
-    4.  **Resolve "Pretty Links".** This step handles directory links (e.g., `about-us-6/`) by appending `index.html` to them, so the crawler knows which file to check.
+    4.  **Resolve "Pretty Links".** This handles directory links (e.g., `about-us-6/`) by appending `index.html`.
         ```bash
-        sed 's|/$|/index.html|' _temp_assets_raw.txt > _temp_assets_processed.txt
+        sed 's|/$|/index.html|' _temp_assets_local.txt > _temp_assets_processed.txt
         ```
-    5.  **Normalize Root-Relative Paths.** Isolate paths starting with `/` and prepare them for the live asset list by removing the leading slash.
+    5.  **Normalize Root-Relative Paths.** Isolate paths starting with `/` and prepare them by removing the leading slash.
         ```bash
         grep '^/' _temp_assets_processed.txt | sed 's|^/||' > _temp_assets_normalized.txt
         ```
-    6.  **Normalize Standard Relative Paths.** Isolate other paths (like `../images/pic.jpg`), resolve them relative to `CURRENT_FILE`'s location, and add them to the normalized list.
+    6.  **Normalize Standard Relative Paths.** First, save `CURRENT_FILE`'s directory name to a temporary file.
         ```bash
-        grep -v '^/' _temp_assets_processed.txt > _temp_assets_relative.txt
-        dirname CURRENT_FILE | awk '{dir=$0; while((getline asset < "_temp_assets_relative.txt") > 0) { if (asset) print dir "/" asset }}' | xargs realpath --canonicalize-missing -s | sed 's|^\./||' >> _temp_assets_normalized.txt
+        dirname CURRENT_FILE > _temp_dir.txt
         ```
-    7.  Add the fully resolved asset paths to the master list of live assets and de-duplicate.
+    7.  Now, combine the directory with the standard relative paths using `awk` and `realpath`. The `awk` script reads the directory from `_temp_dir.txt` and prepends it to each path from `_temp_assets_processed.txt`.
+        ```bash
+        grep -v '^/' _temp_assets_processed.txt | awk 'BEGIN { getline dir < "_temp_dir.txt" } { if ($0) print dir "/" $0 }' | xargs realpath --canonicalize-missing -s | sed 's|^\./||' >> _temp_assets_normalized.txt
+        ```
+    8.  Add the fully resolved asset paths to the master list of live assets and de-duplicate.
         ```bash
         cat _temp_assets_normalized.txt >> _state_for_cleanup/_live_assets.txt
         sort -u -o _state_for_cleanup/_live_assets.txt _state_for_cleanup/_live_assets.txt
         ```
-    8.  Identify new crawlable files (`.html`, `.css`) and add them to the queue if they haven't been seen before.
+    9.  Identify new crawlable files (`.html`, `.css`) and add them to the queue if they haven't been seen before.
         ```bash
         grep -E '\.html$|\.css$' _temp_assets_normalized.txt > _temp_crawl_candidates.txt
         comm -23 <(sort _temp_crawl_candidates.txt) <(sort _state_for_cleanup/_crawled_files.txt) | comm -23 - <(sort _state_for_cleanup/_crawl_queue.txt) >> _state_for_cleanup/_crawl_queue.txt
         ```
-    9.  Mark `CURRENT_FILE` as processed.
+    10. Mark `CURRENT_FILE` as processed.
         ```bash
         head -n 1 _state_for_cleanup/_crawl_queue.txt >> _state_for_cleanup/_crawled_files.txt
         sed -i '1d' _state_for_cleanup/_crawl_queue.txt
         ```
-    10. Clean up temporary files.
+    11. Clean up all temporary files for this turn.
         ```bash
-        rm _temp_assets_raw.txt _temp_assets_processed.txt _temp_assets_relative.txt _temp_assets_normalized.txt _temp_crawl_candidates.txt
+        rm _temp_assets_local.txt _temp_assets_processed.txt _temp_assets_normalized.txt _temp_dir.txt _temp_crawl_candidates.txt
         ```
-    11. Conclude your turn by stating: "Processed `CURRENT_FILE`. More work remains."
+    12. Conclude your turn by stating: "Processed `CURRENT_FILE`. More work remains."
 
 **STATE 3: ANALYSIS**
 *   **Check:** Is `_state_for_cleanup/_crawl_queue.txt` empty AND does `_state_for_cleanup/_unreachable_files.txt` NOT exist?
