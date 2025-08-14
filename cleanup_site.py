@@ -1,15 +1,14 @@
 import os
 import re
-import shutil
 from bs4 import BeautifulSoup
-from datetime import datetime  # Added import for datetime
+import shutil
+from datetime import datetime
 
 # Configuration
 SITE_ROOT = '.'  # Current directory as site root
 EXCLUDED_PREFIXES = ['wp-content/cache/', 'wp-content/uploads/', '.git/', '_state_for_cleanup', '_safe_to_remove']
-MENU_ITEM_TO_REMOVE = 'Contact'  # The exact text of the menu item to remove, linked to contact-4 folder
 
-def remove_contact_menu():
+def remove_blog_and_footer_blocks():
     modified_files = []
     for root, dirs, files in os.walk(SITE_ROOT):
         # Skip excluded directories
@@ -23,20 +22,27 @@ def remove_contact_menu():
                 content = f.read()
             
             soup = BeautifulSoup(content, 'html.parser')
-            
-            # Find menu blocks (vertical menu or similar)
-            menu_lists = soup.find_all(['ul', 'nav'], class_=re.compile(r'(vertical_menu|main-menu|nav-menu|side_menu|menu_area|qode_vertical_menu)', re.IGNORECASE))
             modified = False
-            for menu in menu_lists:
-                for li in menu.find_all('li'):
-                    a = li.find('a')
-                    if a and a.text.strip() == MENU_ITEM_TO_REMOVE:
-                        # Check if the href points to contact-4 or a related path
-                        href = a.get('href', '').strip()
-                        if href and ('contact-4' in href or 'contact-4/index.html' in href):
-                            li.decompose()  # Remove the <li> element
-                            modified = True
-                            print(f"Removed 'Contact' menu item (linked to contact-4) from {file_path}")
+            
+            # Remove the "Latest From Our Blog" block (div with class="column2 footer_col2")
+            blog_blocks = soup.find_all('div', class_='column2 footer_col2')
+            for block in blog_blocks:
+                block.decompose()
+                modified = True
+                print(f"Removed 'Latest From Our Blog' block from {file_path}")
+            
+            # Remove the "| Managed By Dan Webmaster" from textwidget div
+            textwidgets = soup.find_all('div', class_='textwidget')
+            for div in textwidgets:
+                # Iterate over contents and remove from " | Managed By " onward
+                contents = list(div.contents)
+                for i, child in enumerate(contents):
+                    if isinstance(child, str) and '| Managed By' in child:
+                        # Remove this text node and the following <a> if present
+                        div.contents = div.contents[:i]
+                        modified = True
+                        print(f"Removed '| Managed By Dan Webmaster' block from {file_path}")
+                        break
             
             if modified:
                 # Backup original
@@ -52,42 +58,20 @@ def remove_contact_menu():
     
     return modified_files
 
-def quarantine_contact_folder():
-    contact_folder = 'contact-4'
-    if os.path.exists(contact_folder) and not any(contact_folder.startswith(prefix.rstrip('/')) for prefix in EXCLUDED_PREFIXES):
-        dest = os.path.join(QUARANTINE_DIR, contact_folder)
-        os.makedirs(QUARANTINE_DIR, exist_ok=True)
-        if os.path.exists(dest):
-            backup_num = 1
-            while os.path.exists(f"{dest}~{backup_num}"):
-                backup_num += 1
-            dest = f"{dest}~{backup_num}"
-        shutil.move(contact_folder, dest)
-        print(f"Quarantined folder: {contact_folder}")
-        return [contact_folder]
-    return []
-
-def report(modified_files, quarantined_folders):
+def report(modified_files):
     print("\nSummary Report:")
     print(f"Modified Files: {len(modified_files)}")
     if modified_files:
         print("Files modified:")
         for file in modified_files:
             print(f"- {file}")
-    print(f"Quarantined Folders: {len(quarantined_folders)}")
-    if quarantined_folders:
-        print("Folders quarantined:")
-        for folder in quarantined_folders:
-            print(f"- {folder}")
     else:
-        print("No 'contact-4' folder found to quarantine.")
-    print("| Notes             | Review _safe_to_remove_menu_folders before permanent deletion. 'Contact' menu items and contact-4 folder removed where found; wp-content/uploads is preserved. |")
+        print("No blocks found to remove.")
+    print("| Notes             | Review modified index.html files. Original files backed up with .bak extension. |")
     
-    print("\n**TASK COMPLETE. 'Contact' menu items and contact-4 folder removed where found. Original files backed up with .bak extension, folder moved to _safe_to_remove_menu_folders.**")
+    print("\n**TASK COMPLETE. Specified blocks removed from index.html files where found.**")
 
 # Run the process
-print(f"Starting removal of 'Contact' menu items and contact-4 folder at {datetime.now().strftime('%I:%M %p PDT on %B %d, %Y')}...")
-QUARANTINE_DIR = '_safe_to_remove_menu_folders'  # Define here for use in quarantine
-modified_files = remove_contact_menu()
-quarantined_folders = quarantine_contact_folder()
-report(modified_files, quarantined_folders)
+print(f"Starting removal of specified blocks at {datetime.now().strftime('%I:%M %p PDT on %B %d, %Y')}...")
+modified_files = remove_blog_and_footer_blocks()
+report(modified_files)
